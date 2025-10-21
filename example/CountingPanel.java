@@ -5,6 +5,8 @@ import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 
+import com.chroma.GameComponent
+
 public class CountingPanel extends GameComponent {
 
     private static final long serialVersionUID = 1L;
