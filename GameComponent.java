@@ -1,4 +1,4 @@
-package com.chroma.number.rpg.core;
+package com.chroma.GameComponent;
 
 import java.awt.Graphics;
 import java.awt.Graphics2D;
