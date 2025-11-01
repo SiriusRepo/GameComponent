@@ -1,4 +1,4 @@
-package com.chroma.GameComponent;
+package com.chroma.number.rpg.core;
 
 import java.awt.Graphics;
 import java.awt.Graphics2D;
@@ -19,14 +19,16 @@ public abstract class GameComponent extends JPanel implements Runnable, KeyListe
 
     // Time step for updates (seconds per frame)
     private double dt = 1.0 / 60.0;
-    private double fps = 0.0;
+    private double fps = 1.0 / dt;
+    private double fpsSmoothing = 0.9;
     
     public int mouseX, mouseY = 0;
     public double mouseWheelDelta, mouseWheelTotal = 0;
     public boolean mouseLeft, mouseRight, mouseMid, mouseInScreen, mouseLeftClicked, mouseRightClicked, mouseMidClicked = false;
     
-    private Map<Integer, Boolean> keyMap = new HashMap<>();
-    private Map<Integer, Boolean> keyTouched = new HashMap<>();
+    private Map<Integer, Boolean> keyHeld = new HashMap<>();
+    private Map<Integer, Boolean> keyPressed = new HashMap<>();
+    private Map<Integer, Boolean> keyClicked = new HashMap<>();
 
     // Thread control flags
     private volatile boolean running = false;
@@ -53,6 +55,7 @@ public abstract class GameComponent extends JPanel implements Runnable, KeyListe
             running = true;
             gameThread = new Thread(this, "GameComponent-Thread");
             gameThread.start();
+            requestInputFocus();
         }
     }
 
@@ -86,18 +89,18 @@ public abstract class GameComponent extends JPanel implements Runnable, KeyListe
 
     /**
      * Sets the update interval based on desired frame rate.
-     * @param frameRate Target frames per second
+     * @param desiredFPS Desired frames per second
      */
-    public void setFrameRate(double frameRate) {
-        dt = 1.0 / frameRate;
+    public void setDesiredFPS(double desiredFPS) {
+        dt = 1.0 / desiredFPS;
     }
 
     /**
      * Sets the update interval directly.
-     * @param delta Time step in seconds
+     * @param desiredDelta Desired time step in seconds
      */
-    public void setDelta(double delta) {
-        dt = delta;
+    public void setDesiredDelta(double desiredDelta) {
+        dt = desiredDelta;
     }
     
     /**
@@ -107,21 +110,59 @@ public abstract class GameComponent extends JPanel implements Runnable, KeyListe
         return fps;
     }
     
-    public boolean keyPressed(int keyCode) {
-    	return keyMap.getOrDefault(keyCode, false);
+    /**
+     * Determines if a certain key is held.
+     * @param keyCode The key-code of the key
+     */
+    public boolean isKeyHeld(int keyCode) {
+    	return keyHeld.getOrDefault(keyCode, false);
     }
     
-    public boolean keyTouched(int keyCode) {
-    	return keyTouched.getOrDefault(keyCode, false);
+    /**
+     * Determines if a certain key is pressed.
+     * Holding the key makes this fire repeatedly.
+     * @param keyCode The key-code of the key
+     */
+    public boolean isKeyPressed(int keyCode) {
+    	return keyPressed.getOrDefault(keyCode, false);
     }
     
+    /**
+     * Determines if a certain key is clicked.
+     * Fires when the key starts being pressed.
+     * @param keyCode The key-code of the key
+     */
+    public boolean isKeyClicked(int keyCode) {
+    	return keyClicked.getOrDefault(keyCode, false);
+    }
+    
+    /**
+     * Resets the input detection.
+     * Includes held keys, clicked keys, pressed keys and mouse buttons, position, status and wheel.
+     */
     public void resetInput() {
-        keyMap.clear();
-        keyTouched.clear();
+        keyHeld.clear();
+        keyClicked.clear();
+        keyPressed.clear();
         mouseLeft = mouseRight = mouseMid = mouseLeftClicked = mouseRightClicked = mouseMidClicked = mouseInScreen = false;
         mouseWheelDelta = mouseWheelTotal = 0;
     }
     
+    /**
+     * Sets the FPS Smoothing.
+     * @param smoothing The desired smoothing.
+     * Tip: With a higher value, the FPS is smoother, so it takes longer to catch up.
+     * With a lower value, the FPS is chopier, so it adjusts faster.
+     * Default smoothing is 0.9.
+     */
+    public void setFPSSmoothing(double smoothing) {
+    	fpsSmoothing = smoothing;
+    }
+    
+    /**
+     * Helper function to focus the user to the window, 
+     * making it successfully detect inputs.
+     */
     public void requestInputFocus() {
         setFocusable(true);
         requestFocusInWindow();
@@ -132,14 +173,13 @@ public abstract class GameComponent extends JPanel implements Runnable, KeyListe
         start(); // Subclass-defined initialization
 
         long lastTime = System.nanoTime();
-        double nsPerUpdate = 1_000_000_000.0 * dt;
         double delta = 0;
         long fpsTimer = System.nanoTime();
         
 
         while (running) {
             long now = System.nanoTime();
-            delta += (now - lastTime) / nsPerUpdate;
+            delta += (now - lastTime) / (1_000_000_000.0 * dt);
             lastTime = now;
 
             if (resumed) {
@@ -151,21 +191,24 @@ public abstract class GameComponent extends JPanel implements Runnable, KeyListe
                 
                 if (shouldUpdate) {
                 	repaint();
-                	fps = 1.0 / (now - fpsTimer) * 1_000_000_000.0;
+                	fps = fps * fpsSmoothing + (1.0e9 / (now - fpsTimer)) * (1 - fpsSmoothing);
                 	fpsTimer = now;
                 	
                 	if (mouseWheelDelta != 0) {
                 		mouseWheelDelta = 0;
                 	}
                 	
-                	keyTouched.clear();
+                	keyClicked.clear();
+                	keyPressed.clear();
                 	mouseLeftClicked = mouseRightClicked = mouseMidClicked = false;
                 }
             } else {
                 delta = 0;
             }
 
-            Thread.yield();
+            try {
+                Thread.sleep(1);
+            } catch (InterruptedException ignored) {}
         }
     }
 
@@ -258,12 +301,15 @@ public abstract class GameComponent extends JPanel implements Runnable, KeyListe
     
     @Override
     public void keyPressed(KeyEvent e) {
-    	keyMap.put(e.getExtendedKeyCode(), true);
-    	keyTouched.put(e.getExtendedKeyCode(), true);
+    	int code = e.getExtendedKeyCode();
+    	keyPressed.put(code, true);
+    	if (keyHeld.getOrDefault(code, false)) return;
+    	keyHeld.put(code, true);
+    	keyClicked.put(code, true);
     }
     
     @Override
     public void keyReleased(KeyEvent e) {
-    	keyMap.put(e.getExtendedKeyCode(), false);
+    	keyHeld.put(e.getExtendedKeyCode(), false);
     }
 }
